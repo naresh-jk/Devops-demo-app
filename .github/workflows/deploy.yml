@@ -1,0 +1,76 @@
+name: Deploy Next.js App to EC2
+
+on:
+  push:
+    branches:
+      - main # Trigger the workflow when code is pushed to the main branch
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    
+    # Define environment variables used throughout the job
+    env:
+      # This is the user you typically log in as (e.g., 'ubuntu' on EC2)
+      SSH_USER: ubuntu 
+      # Replace this with your actual EC2 Public IP address or DNS name
+      EC2_HOST: 13.204.88.202 
+      # The directory where the app is cloned on the EC2 server
+      TARGET_DIR: ~/Devops-demo-app
+      # The PM2 process name we used (Devops-App)
+      PM2_APP_NAME: Devops-App
+
+    steps:
+    - name: Checkout repository code
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      # Assumes your app uses Node 20. Change this version if necessary.
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Install NVM and Set Node Version on EC2 (Required if EC2 starts clean)
+      # Ensures the remote server has the correct Node environment loaded via NVM
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ env.EC2_HOST }}
+        username: ${{ env.SSH_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          # Load NVM and ensure the correct Node version is active
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+          nvm use --lts
+          echo "Node environment confirmed on EC2."
+
+    - name: Run Deployment Commands on EC2
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ env.EC2_HOST }}
+        username: ${{ env.SSH_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          echo "Starting deployment..."
+          
+          # 1. Navigate to the application directory
+          cd ${{ env.TARGET_DIR }}
+          
+          # 2. Pull the latest code from GitHub
+          git pull origin main
+          
+          # 3. Load NVM environment (needed for 'npm')
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+          
+          # 4. Install new dependencies (only if package.json changed)
+          npm install
+          
+          # 5. Build the Next.js application for production
+          npm run build
+          
+          # 6. Restart the application using PM2
+          # 'pm2 restart' gracefully replaces the running process with the new build
+          pm2 restart ${{ env.PM2_APP_NAME }}
+          
+          echo "Deployment complete. Application restarted via PM2."
